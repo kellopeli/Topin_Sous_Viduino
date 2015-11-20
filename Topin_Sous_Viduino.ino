@@ -11,13 +11,15 @@
 #include <PID_v1.h>
 #include <PID_AutoTune_v0.h>
 
-// Libraries for the Adafruit RGB/LCD Shield
 #include <Wire.h>
-//#include <Adafruit_MCP23017.h>
-//#include <Adafruit_RGBLCDShield.h>
-#include <LiquidCrystal.h>
-enum ePins { LCD_RS=8, LCD_EN=9, LCD_D4=4, LCD_D5=5, LCD_D6=6, LCD_D7=7, LCD_BL=10 }; // define LCD pins
-LiquidCrystal lcd(LCD_RS, LCD_EN, LCD_D4, LCD_D5, LCD_D6, LCD_D7); // initialize the library with the numbers of the interface pins
+
+#include <LiquidCrystal_I2C.h>
+LiquidCrystal_I2C lcd(0x3F, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);  // Set the LCD I2C address
+#define LCD_BL     13
+
+//#include <LiquidCrystal.h>
+//enum ePins { LCD_RS=8, LCD_EN=9, LCD_D4=4, LCD_D5=5, LCD_D6=6, LCD_D7=7, LCD_BL=10 }; // define LCD pins
+//LiquidCrystal lcd(LCD_RS, LCD_EN, LCD_D4, LCD_D5, LCD_D6, LCD_D7); // initialize the library with the numbers of the interface pins
 
 //#include "DFRkeypad.h"
 
@@ -41,13 +43,13 @@ LiquidCrystal lcd(LCD_RS, LCD_EN, LCD_D4, LCD_D5, LCD_D6, LCD_D7); // initialize
 // ************************************************
 
 // Output Relay
-#define RelayPin 40
+#define RelayPin 8
 
 // One-Wire Temperature Sensor
 // (Use GPIO pins for power/ground to simplify the wiring)
-#define ONE_WIRE_GND 30
-#define ONE_WIRE_BUS 32
-#define ONE_WIRE_PWR 34
+#define ONE_WIRE_GND 11
+#define ONE_WIRE_BUS 10
+#define ONE_WIRE_PWR 9
 
 // ************************************************
 // PID Variables and constants
@@ -175,19 +177,20 @@ void setup()
 
    // Initialize LCD DiSplay 
 
-   lcd.begin(16, 2);
-   lcd.createChar(1, degree); // create degree symbol from the binary
+   lcd.begin(20, 4);
+   lcd.home ();                   // go home
+   //lcd.createChar(1, degree); // create degree symbol from the binary
    
    lcd.print(F("    Adafruit"));
    lcd.setCursor(0, 1);
    lcd.print(F("   Sous Vide!"));
-
+   delay(3000);
    // Start up the DS18B20 One Wire Temperature Sensor
 
    sensors.begin();
    if (!sensors.getAddress(tempSensor, 0)) 
    {
-      lcd.setCursor(0, 1);
+      lcd.setCursor(0, 3);
       lcd.print(F("Sensor Error"));
    }
    sensors.setResolution(tempSensor, 12);
@@ -277,6 +280,7 @@ void Off()
    myPID.SetMode(MANUAL);
    //analogWrite(LCD_BL, 150);                       // set the PWM brightness to maximum   }
    digitalWrite(RelayPin, LOW);  // make sure it is off
+   lcd.home();
    lcd.print(F("    Adafruit"));
    lcd.setCursor(0, 1);
    lcd.print(F("   Sous Vide! Off"));
