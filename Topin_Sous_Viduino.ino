@@ -451,24 +451,21 @@ long read_steps()
   long newPosition = myEnc.read();
   long steps = newPosition - oldPosition;
 
-  if (steps != 0) {  
+  if (steps != 0) {
+    delay(50);
+    newPosition = myEnc.read();
+    steps = newPosition - oldPosition;
+
+    if (steps == 2) {
+      steps = 1;
+    }
+    if (steps == -2) {
+      steps = -1;
+    }
     Serial.print(millis() - lastInput);
     Serial.print(" ");
     Serial.println(steps);
-    if ((millis() - lastInput) < 80) {
-      if (abs(steps) == 1) {
-        steps = 0; // prevent double steps
-        delay(200);
-      }
-    }
-    if ((millis() - lastInput) > 500) {
-      if (steps == 2) {
-        steps = 1;
-      }
-      if (steps == -2) {
-        steps = -1;
-      }
-    }
+
     lastInput = millis();
     oldPosition = newPosition;
   }
