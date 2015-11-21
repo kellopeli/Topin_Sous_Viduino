@@ -116,26 +116,30 @@ PID_ATune aTune(&Input, &Output);
 
 unsigned long lastInput = 0; // last button press
 
-const uint8_t degree[8] = // define the degree symbol 
-{ 
- B00110, 
- B01001, 
- B01001, 
- B00110, 
- B00000,
- B00000, 
- B00000, 
- B00000 
-}; 
+// Creat a set of new characters
+const uint8_t charBitmap[][8] = {
+   { 0xc, 0x12, 0x12, 0xc, 0, 0, 0, 0 },
+   { 0x6, 0x9, 0x9, 0x6, 0, 0, 0, 0 },
+   { 0x0, 0x6, 0x9, 0x9, 0x6, 0, 0, 0x0 },
+   { 0x0, 0xc, 0x12, 0x12, 0xc, 0, 0, 0x0 },
+   { 0x0, 0x0, 0xc, 0x12, 0x12, 0xc, 0, 0x0 },
+   { 0x0, 0x0, 0x6, 0x9, 0x9, 0x6, 0, 0x0 },
+   { 0x0, 0x0, 0x0, 0x6, 0x9, 0x9, 0x6, 0x0 },
+   { 0x0, 0x0, 0x0, 0xc, 0x12, 0x12, 0xc, 0x0 }
+   
+};
 
 const int logInterval = 10000; // log every 10 seconds
 long lastLogTime = 0;
+
+long oldPosition = 0;
+
 
 // ************************************************
 // States for state machine
 // ************************************************
 enum operatingState { OFF = 0, SETP, RUN, TUNE_P, TUNE_I, TUNE_D, AUTO};
-operatingState opState = OFF;
+operatingState opState = RUN;
 
 // ************************************************
 // Sensor Variables and constants
@@ -181,19 +185,26 @@ void setup()
    digitalWrite(ONE_WIRE_PWR, HIGH);
 
    // Initialize LCD DiSplay 
+   pinMode(LCD_BL, OUTPUT);                        // pin LCD_BL is LCD backlight brightness (PWM)
+   analogWrite(LCD_BL, 255);                       // set the PWM brightness to maximum
 
    lcd.begin(20, 4);
-   lcd.home ();                   // go home
-   //lcd.createChar(1, (uint8_t *)&degree); // create degree symbol from the binary
    
+   int charBitmapSize = (sizeof(charBitmap ) / sizeof (charBitmap[0]));
+
+   for ( int i = 0; i < charBitmapSize; i++ )
+   {
+      lcd.createChar ( i, (uint8_t *)charBitmap[i] );
+   }
+   
+   lcd.home ();                   // go home
    lcd.print(F("    Adafruit"));
    lcd.setCursor(0, 1);
    lcd.print(F("   Sous Vide!"));
    lcd.setCursor(0, 2);
-   lcd.print(F("github/kellopeli/Topin_Sous_Viduino"));
+   lcd.print(F("github/kellopeli/"));
    lcd.setCursor(0, 3);
-   lcd.print(F("   Sous Vide!"));
-   delay(3000);
+   lcd.print(F("Topin_Sous_Viduino"));
    // Start up the DS18B20 One Wire Temperature Sensor
 
    sensors.begin();
@@ -220,9 +231,6 @@ void setup()
 
   //Timer2 Overflow Interrupt Enable
   TIMSK2 |= 1<<TOIE2;
-
-  pinMode(LCD_BL, OUTPUT);                        // pin LCD_BL is LCD backlight brightness (PWM)
-  analogWrite(LCD_BL, 255);                       // set the PWM brightness to maximum
 
   pinMode ( PUSHBUTTON, INPUT );
   digitalWrite ( PUSHBUTTON, HIGH );
@@ -315,30 +323,23 @@ void Off()
 void Tune_Sp()
 {
    lcd.print(F("Set Temperature:"));
+   
    uint8_t buttons = 0;
+   oldPosition = myEnc.read();
+
    while(true)
    {
       buttons = ReadButtons();
 
       float increment = 0.1;
-      if (buttons & BUTTON_SHIFT)
-      {
-        increment *= 10;
-      }
+      double steps = read_steps();
+
+      Setpoint += increment * steps;
+
       if (buttons & BUTTON_RIGHT)
       {
          opState = TUNE_P;
          return;
-      }
-      if (buttons & BUTTON_UP)
-      {
-         Setpoint += increment;
-         delay(200);
-      }
-      if (buttons & BUTTON_DOWN)
-      {
-         Setpoint -= increment;
-         delay(200);
       }
     
       if ((millis() - lastInput) > 3000)  // return to RUN after 3 seconds idle
@@ -363,31 +364,29 @@ void TuneP()
 {
    lcd.print(F("Set Kp"));
 
+   lcd.setCursor(0,3);
+   lcd.print(F("Set Proportional"));
+   lcd.setCursor(0,1);
+
    uint8_t buttons = 0;
+
+   oldPosition = myEnc.read();
+
    while(true)
    {
       buttons = ReadButtons();
+      long steps = read_steps();
 
       float increment = 1.0;
-      if (buttons & BUTTON_SHIFT)
-      {
-        increment *= 10;
-      }
+
+      Kp += increment * steps;
+
       if (buttons & BUTTON_RIGHT)
       {
          opState = TUNE_I;
          return;
       }
-      if (buttons & BUTTON_UP)
-      {
-         Kp += increment;
-         delay(200);
-      }
-      if (buttons & BUTTON_DOWN)
-      {
-         Kp -= increment;
-         delay(200);
-      }
+
       if ((millis() - lastInput) > 3000)  // return to RUN after 3 seconds idle
       {
          opState = RUN;
@@ -409,46 +408,31 @@ void TuneP()
 void TuneI()
 {
    lcd.print(F("Set Ki"));
+   lcd.setCursor(0,3);
+   lcd.print(F("Set Integral"));
+   lcd.setCursor(0,1);
 
    uint8_t buttons = 0;
 
-   long oldPosition = myEnc.read();
+   oldPosition = myEnc.read();
    
    while(true)
    {
-    
-      long newPosition = myEnc.read();
       float increment = 0.01;
+      long steps = read_steps();
 
-      if (newPosition != oldPosition) {
-        lastInput = millis();
-        increment = 0.01 * (newPosition - oldPosition);
-        Ki += increment;
-        oldPosition = newPosition;
-      }
+      increment = 0.01 * steps;
+      Ki += increment;
       
       buttons = ReadButtons();
 
-      if (buttons & BUTTON_SHIFT)
-      {
-        increment *= 10;
-      }
       if (buttons & BUTTON_RIGHT)
       {
          opState = TUNE_D;
          return;
       }
-      if (buttons & BUTTON_UP)
-      {
-         Ki += increment;
-         delay(200);
-      }
-      if (buttons & BUTTON_DOWN)
-      {
-         Ki -= increment;
-         delay(200);
-      }
-      if ((millis() - lastInput) > 3000)  // return to RUN after 3 seconds idle
+
+      if ((millis() - lastInput) > 30000)  // return to RUN after 3 seconds idle
       {
          opState = RUN;
          return;
@@ -458,6 +442,38 @@ void TuneI()
       lcd.print(" ");
       DoControl();
    }
+}
+
+
+// ************************************************
+long read_steps()
+{
+  long newPosition = myEnc.read();
+  long steps = newPosition - oldPosition;
+
+  if (steps != 0) {  
+    Serial.print(millis() - lastInput);
+    Serial.print(" ");
+    Serial.println(steps);
+    if ((millis() - lastInput) < 80) {
+      if (abs(steps) == 1) {
+        steps = 0; // prevent double steps
+        delay(200);
+      }
+    }
+    if ((millis() - lastInput) > 500) {
+      if (steps == 2) {
+        steps = 1;
+      }
+      if (steps == -2) {
+        steps = -1;
+      }
+    }
+    lastInput = millis();
+    oldPosition = newPosition;
+  }
+  
+  return steps;
 }
 
 // ************************************************
@@ -696,8 +712,8 @@ uint8_t ReadButtons()
   int buttonState = digitalRead(PUSHBUTTON);
   uint8_t buttons = BUTTON_NONE;
 
-  Serial.print("Button: ");
-  Serial.println(buttonState);
+  //Serial.print("Button: ");
+  //Serial.println(buttonState);
   if (buttonState == LOW) {
     digitalWrite ( 13, HIGH );
     lastInput = millis();
