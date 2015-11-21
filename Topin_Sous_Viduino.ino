@@ -13,9 +13,12 @@
 
 #include <Wire.h>
 
+#include <Encoder.h>
+Encoder myEnc(2, 3);
+
 #include <LiquidCrystal_I2C.h>
 LiquidCrystal_I2C lcd(0x3F, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);  // Set the LCD I2C address
-#define LCD_BL     13
+#define LCD_BL 7
 
 //#include <LiquidCrystal.h>
 //enum ePins { LCD_RS=8, LCD_EN=9, LCD_D4=4, LCD_D5=5, LCD_D6=6, LCD_D7=7, LCD_BL=10 }; // define LCD pins
@@ -27,7 +30,7 @@ LiquidCrystal_I2C lcd(0x3F, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);  // Set the LCD I
 #define BUTTON_NONE 0
 #define BUTTON_UP 0x08
 #define BUTTON_DOWN 0x04
-#define BUTTON_LEFT 0x10
+//#define BUTTON_LEFT 0x10
 #define BUTTON_RIGHT 0x02
 #define BUTTON_SELECT 0x01
 
@@ -47,9 +50,11 @@ LiquidCrystal_I2C lcd(0x3F, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);  // Set the LCD I
 
 // One-Wire Temperature Sensor
 // (Use GPIO pins for power/ground to simplify the wiring)
-#define ONE_WIRE_GND 11
-#define ONE_WIRE_BUS 10
-#define ONE_WIRE_PWR 9
+#define ONE_WIRE_GND 12
+#define ONE_WIRE_BUS 11
+#define ONE_WIRE_PWR 10
+
+#define PUSHBUTTON 9
 
 // ************************************************
 // PID Variables and constants
@@ -111,7 +116,7 @@ PID_ATune aTune(&Input, &Output);
 
 unsigned long lastInput = 0; // last button press
 
-byte degree[8] = // define the degree symbol 
+const uint8_t degree[8] = // define the degree symbol 
 { 
  B00110, 
  B01001, 
@@ -179,10 +184,14 @@ void setup()
 
    lcd.begin(20, 4);
    lcd.home ();                   // go home
-   //lcd.createChar(1, degree); // create degree symbol from the binary
+   //lcd.createChar(1, (uint8_t *)&degree); // create degree symbol from the binary
    
    lcd.print(F("    Adafruit"));
    lcd.setCursor(0, 1);
+   lcd.print(F("   Sous Vide!"));
+   lcd.setCursor(0, 2);
+   lcd.print(F("github/kellopeli/Topin_Sous_Viduino"));
+   lcd.setCursor(0, 3);
    lcd.print(F("   Sous Vide!"));
    delay(3000);
    // Start up the DS18B20 One Wire Temperature Sensor
@@ -196,7 +205,7 @@ void setup()
    sensors.setResolution(tempSensor, 12);
    sensors.setWaitForConversion(false);
 
-   delay(3000);  // Splash screen
+   delay(1000);  // Splash screen
 
    // Initialize the PID and related variables
    LoadParameters();
@@ -212,13 +221,11 @@ void setup()
   //Timer2 Overflow Interrupt Enable
   TIMSK2 |= 1<<TOIE2;
 
-  // Init DFR
-//  DFRkeypad::FastADC(true);                      // increase ADC sample frequency
-//  DFRkeypad::iDEFAULT_THRESHOLD=50;              // maximum threshold acceptable so bounds in DFRkeypad::iARV_VALUES are not overlapping
-
-  pinMode(A0, Input);
   pinMode(LCD_BL, OUTPUT);                        // pin LCD_BL is LCD backlight brightness (PWM)
   analogWrite(LCD_BL, 255);                       // set the PWM brightness to maximum
+
+  pinMode ( PUSHBUTTON, INPUT );
+  digitalWrite ( PUSHBUTTON, HIGH );
   
 }
 
@@ -303,7 +310,6 @@ void Off()
 // Setpoint Entry State
 // UP/DOWN to change setpoint
 // RIGHT for tuning parameters
-// LEFT for OFF
 // SHIFT for 10x tuning
 // ************************************************
 void Tune_Sp()
@@ -318,11 +324,6 @@ void Tune_Sp()
       if (buttons & BUTTON_SHIFT)
       {
         increment *= 10;
-      }
-      if (buttons & BUTTON_LEFT)
-      {
-         opState = RUN;
-         return;
       }
       if (buttons & BUTTON_RIGHT)
       {
@@ -356,7 +357,6 @@ void Tune_Sp()
 // Proportional Tuning State
 // UP/DOWN to change Kp
 // RIGHT for Ki
-// LEFT for setpoint
 // SHIFT for 10x tuning
 // ************************************************
 void TuneP()
@@ -372,11 +372,6 @@ void TuneP()
       if (buttons & BUTTON_SHIFT)
       {
         increment *= 10;
-      }
-      if (buttons & BUTTON_LEFT)
-      {
-         opState = SETP;
-         return;
       }
       if (buttons & BUTTON_RIGHT)
       {
@@ -409,7 +404,6 @@ void TuneP()
 // Integral Tuning State
 // UP/DOWN to change Ki
 // RIGHT for Kd
-// LEFT for Kp
 // SHIFT for 10x tuning
 // ************************************************
 void TuneI()
@@ -417,19 +411,27 @@ void TuneI()
    lcd.print(F("Set Ki"));
 
    uint8_t buttons = 0;
+
+   long oldPosition = myEnc.read();
+   
    while(true)
    {
+    
+      long newPosition = myEnc.read();
+      float increment = 0.01;
+
+      if (newPosition != oldPosition) {
+        lastInput = millis();
+        increment = 0.01 * (newPosition - oldPosition);
+        Ki += increment;
+        oldPosition = newPosition;
+      }
+      
       buttons = ReadButtons();
 
-      float increment = 0.01;
       if (buttons & BUTTON_SHIFT)
       {
         increment *= 10;
-      }
-      if (buttons & BUTTON_LEFT)
-      {
-         opState = TUNE_P;
-         return;
       }
       if (buttons & BUTTON_RIGHT)
       {
@@ -462,7 +464,6 @@ void TuneI()
 // Derivative Tuning State
 // UP/DOWN to change Kd
 // RIGHT for setpoint
-// LEFT for Ki
 // SHIFT for 10x tuning
 // ************************************************
 void TuneD()
@@ -477,11 +478,6 @@ void TuneD()
       if (buttons & BUTTON_SHIFT)
       {
         increment *= 10;
-      }
-      if (buttons & BUTTON_LEFT)
-      {
-         opState = TUNE_I;
-         return;
       }
       if (buttons & BUTTON_RIGHT)
       {
@@ -514,7 +510,6 @@ void TuneD()
 // PID COntrol State
 // SHIFT and RIGHT for autotune
 // RIGHT - Setpoint
-// LEFT - OFF
 // ************************************************
 void Run()
 {
@@ -534,9 +529,6 @@ void Run()
 
       buttons = ReadButtons();
 
-      Serial.print("*  buttons: ");
-      Serial.println(buttons);
-
       if ((buttons & BUTTON_SHIFT) 
          && (buttons & BUTTON_RIGHT) 
          && (abs(Input - Setpoint) < 0.5))  // Should be at steady-state
@@ -546,11 +538,6 @@ void Run()
       else if (buttons & BUTTON_RIGHT)
       {
         opState = SETP;
-        return;
-      }
-      else if (buttons & BUTTON_LEFT)
-      {
-        opState = OFF;
         return;
       }
       
@@ -706,76 +693,21 @@ void FinishAutoTune()
 // ************************************************
 uint8_t ReadButtons()
 {
-  int adc_key_in = analogRead(A0);                       // ... get the analog value for it
+  int buttonState = digitalRead(PUSHBUTTON);
+  uint8_t buttons = BUTTON_NONE;
 
-  if (adc_key_in > (1023 - THRESHOLD)) return BUTTON_NONE; 
-
-  lastInput = millis();
-
-/**
-const char* DFRkeypad::sKEY[]=                          { "---",       "Right",   "Up", "Down", "Left", "Select", "???" };
-const int DFRkeypad::iARV_VALUES[DFRkeypad::eNUM_KEYS]= { 1023,        0,         100,  256,    410,     640,      -1   };
-*/
-  if (adc_key_in < (100 - THRESHOLD))  return BUTTON_RIGHT;  
-  if (adc_key_in < (256 - THRESHOLD))  return BUTTON_UP; 
-  if (adc_key_in < (410 - THRESHOLD))  return BUTTON_DOWN; 
-  if (adc_key_in < (640 - THRESHOLD))  return BUTTON_LEFT;
-  return BUTTON_SELECT;  
-
-}
-
-/**
-uint8_t ReadButtons()
-{
-  //byte key=DFRkeypad::GetKey();                   // read a key identifier
-  int val=analogRead(A0);                       // ... get the analog value for it
-  byte key = 0;
-  uint8_t buttons = 0;
-
-  Serial.print("****");
-  {
-
-    Serial.print(key);
-    Serial.print("*  ADC Value: ");
-    Serial.println(val);
-  }
-  
-  if(key > DFRkeypad::eNO_KEY && key < DFRkeypad::eINVALID_KEY) // if a valid key has been identified
-  {
-    switch (key)
-    {
-      case DFRkeypad::eUP:
-        buttons = BUTTON_UP;
-        break;
-      case DFRkeypad::eDOWN:
-        buttons = BUTTON_DOWN;
-        break;
-      case DFRkeypad::eLEFT:
-        buttons = BUTTON_LEFT;
-        break;
-      case DFRkeypad::eRIGHT:
-        buttons = BUTTON_RIGHT;
-        break;
-      case DFRkeypad::eSELECT:
-        buttons = BUTTON_SELECT;
-        break;
-    }
-    Serial.print("*  buttons: ");
-    Serial.print(buttons);
-    Serial.print("*  num: ");
-    Serial.print(key);
-    Serial.print("*  Key: ");
-    Serial.println(DFRkeypad::KeyName(key));
-    
-  }
-  
-  if (buttons != 0)
-  {
+  Serial.print("Button: ");
+  Serial.println(buttonState);
+  if (buttonState == LOW) {
+    digitalWrite ( 13, HIGH );
     lastInput = millis();
+    buttons = BUTTON_RIGHT;
+  } else {
+    digitalWrite ( 13, LOW );
   }
+
   return buttons;
 }
-*/
 
 // ************************************************
 // Save any parameter changes to EEPROM
